@@ -1,0 +1,79 @@
+工作要求：
+1、抓取信息源，元信息需要单独提取出来
+2、介绍信息抓取的要求：只保存文本和一些必要的标签，如换行<br>、加粗<strong>和空白&nbsp;
+3、抓取下来的信息立即存储到数据库中
+
+目标：建立一个智能的系统，在元信息缺失的条件下，利用预定义的规则，拼接查询词，提交给百度，然后从返回的结果——尤其是包含飘红处理的网页快照
+尤其具有参考价值。
+
+根据前期的抓取工作发现，没有保存文件来源地址是个巨大的失误，选择提取的页面也是不恰当的。
+
+规划：
+（1）首先从http://cksp.eol.cn/expert.php?id=*提取姓名、性别、出生年月、研究领域、工作单位、所在院系、导师类型、招生专业
+个人简介（more_intro)、论文著作(more_thesis)、荣誉奖项(more_award)，此外还有照片、人气指数
+（2）然后从http://cksp.eol.cn/tutor_detail.php?id=*提取职称、承担项目、联系方式（Email、电话、邮编和地址）
+
+需要抓的典型：
+id=1083比较全面;
+id=2948存在多个招生专业 ;
+id=12227没有招生专业;
+id=15987特聘教授，学者称号授予情况——招生专业部分被占去，而且没有tutor页面，只有expert页面。
+id=10的页面只有expert，没有tutor_detail
+
+++++++++++++++++++++++++++++++++++++++
+使用HtmlParser需要熟悉的几点：
+去除文本中的部分标签，只保留比如<br>或者改造标签<p class=""...>为只有<p>，删除其中的<span></span>
+
+HtmlParser可以利用element，通过迭代访问全部的顶级结点，getText是封闭标签内的文本，包含属性等信息，而toHtml是完整的html文本
+
++++++++++++++++++++++++++++++++++++++++
+数据库dbo的导师信息表ProfessorInfo的格式：
+1、ProfessorInfoID——主键，自增
+【2】、ProfessorPostID——导师职称（1-助教、2-讲师、3-副教授、4-教授、5-初级、6-高级、7-副高职、8-正高职、9-研究员）-ProfessorPost的主键
+【3】、UniversityID-院校Id-UniversityInfo的主键
+【4】、UniversityName-院校名
+【5】、EducationBackgroundID-学历ID（专科-1、本科-2、硕士-3、博士-4）
+【6】、ProfessorTypeID-导师类型ID（硕导-1、博导-2）
+7、RecruitPostgraduate—导师招生类型（0、不招生；1、硕士生；2、博士生；3、硕士生和博士生）
+8、ProfessorClicks-默认为0
+9、displayAble-置空
+10、UsersID-默认为0
+【11】、ProfessorPhoto-导师头像图片名称（ProfessorPhoto+主键.后缀名）
+【12】、ProfessorName-导师姓名
+【13】、ProfessorSex-性别
+【14】、ProfessorBirthday-生日
+【15】、ProfessorEmail-Email
+【16】、ProfessorPhone-电话
+【17】、RecruitSubject-招生专业（根据招生专业代码，查找一级学科名称-FirstCourse）
+【18】、ProfessorField-研究领域、研究方向
+【19】、ProfessorTypes-导师职位/专家类别
+【20】、ProfessorIntroduce-导师介绍
+　　在插入导师信息时，需要查询数据库检索的列：院校ID（UniversityID），招生专业（RecruitSubject），其余的ID可以自己保存转换
+如大连理工大学的张三教授、博导，博士学位，招收专业为材料学
+　　数据导入时，需要首先查找该校的id，然后查找该专业的一级学科代码（根据二级学科代码查找secondcourse表，找到其id，然后利用univid和secondcourseid
+查找universitydepartments表，如果存在即保存对应的【一级学科代码】，还需要查找firstcourse表，查找对应的一级学科名称。由于存在二级学科同名但不同码，
+若有多个需要多次确认，一般情况只有一个。
+-----------------------------------------------------------------------------------
+1、院校名称UniversityName->[UniversityInfo]->UniversityId
+2、招生专业名称RecruitName->[SecondCourse]->SecondCourseId&SecondCourseCode
+2.1、如果ResultSet.size==1,则提取SecondCourseCode的前四位->FirstCourseCode->[FirstCourse]->FirstCourseName
+2.2、如果ResultSet.size==0,则人工处理
+2.3、如果ResultSet.size>1,则使用SecondCourseId&UniversityId->[SecondCourse_University]
+　　　 如果存在，则转到2.1，否则使用下一个SecondCourseId
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+【注意】：导入数据库的所有文本必须将其中的所有英文单引号’全部转义为’’，使用str = str.replaceAll("'","''");即可解决
+------------------------------------------------------------------------------------
+1、建立ProfessorInfo表
+create table ProfessorInfo (ProfessorInfoID int UNIQUE,ProfessorPostID int null,
+UniversityID int null,UniversityName nvarchar(32) null,EducationBackgroundID int null,
+ProfessorTypeID int null,RecruitPostgraduate int null,ProfessorClicks int null default 0,
+displayAble int null,UsersID int null default 0,ProfessorPhoto nvarchar(100) null,
+ProfessorName nvarchar(32) null,ProfessorSex nvarchar(6) null,ProfessorBirthday nvarchar(32) null,
+ProfessorEmail nvarchar(32) null,ProfessorPhone nvarchar(32) null,RecruitSubject nvarchar(200) null,
+ProfessorField nvarchar(500) null,ProfessorTypes nvarchar(500) null,ProfessorIntroduce text null);
+2、导入数据
+可以考虑使用Properties文件导入
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+首先PreparedStatement可以一次编译执行多条插入语句，而Statement只能是执行几次插入语句就编译几次。
+PreparedStatement是利用addBatch和executeBatch分别添加和执行多条语句
